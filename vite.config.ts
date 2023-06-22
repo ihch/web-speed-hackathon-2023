@@ -1,10 +1,13 @@
 import path from 'node:path';
 
+import replace from '@rollup/plugin-replace';
+import terser from '@rollup/plugin-terser';
 import react from '@vitejs/plugin-react';
+import gzip from 'rollup-plugin-gzip';
+import { visualizer } from 'rollup-plugin-visualizer';
 import { defineConfig } from 'vite';
 import { ViteEjsPlugin } from 'vite-plugin-ejs';
 import topLevelAwait from 'vite-plugin-top-level-await';
-import wasm from 'vite-plugin-wasm';
 
 import { getFileList } from './tools/get_file_list';
 
@@ -24,25 +27,43 @@ export default defineConfig(async () => {
   return {
     build: {
       assetsInlineLimit: 20480,
-      cssCodeSplit: false,
+      cssCodeSplit: true,
       cssTarget: 'es6',
-      minify: false,
       rollupOptions: {
         output: {
           experimentalMinChunkSize: 40960,
+          manualChunks: (id) => {
+            if (id.includes("node_modules")) {
+              if (id.includes("react")) {
+                return "vendor_react";
+              }
+            }
+          },
         },
+        plugins: [visualizer({ gzipSize: true })],
+        treeshake: 'recommended',
       },
-      target: 'es2015',
+      target: 'modules',
     },
     plugins: [
       react(),
-      wasm(),
+      replace({
+        'process.env.NODE_ENV': JSON.stringify('production')
+      }),
       topLevelAwait(),
       ViteEjsPlugin({
         module: '/src/client/index.tsx',
         title: '買えるオーガニック',
         videos,
       }),
+      terser({
+        compress: {
+          global_defs: { '@process.env.NODE_ENV': JSON.stringify('production') },
+          toplevel: true,
+        },
+        mangle: { toplevel: true },
+      }),
+      gzip(),
     ],
   };
 });

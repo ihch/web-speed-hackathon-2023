@@ -4,11 +4,13 @@ import { koaMiddleware } from '@as-integrations/koa';
 import gracefulShutdown from 'http-graceful-shutdown';
 import Koa from 'koa';
 import bodyParser from 'koa-bodyparser';
+import compress from 'koa-compress';
 import logger from 'koa-logger';
 import route from 'koa-route';
 import send from 'koa-send';
 import session from 'koa-session';
 import serve from 'koa-static';
+import zipcodeJa from 'zipcode-ja';
 
 import type { Context } from './context';
 import { dataSource } from './data_source';
@@ -31,9 +33,11 @@ async function init(): Promise<void> {
   app.use(session({}, app));
 
   app.use(async (ctx, next) => {
-    ctx.set('Cache-Control', 'no-store');
+    ctx.set('Cache-Control', 'max-age=86400');
     await next();
   });
+
+  app.use(compress());
 
   const apolloServer = await initializeApolloServer();
   await apolloServer.start();
@@ -55,6 +59,42 @@ async function init(): Promise<void> {
       ctx.status = 204;
     }),
   );
+
+  app.use(route.get('/zipCode', (ctx) => {
+    const zipCode = ctx.request.query.zipCode;
+    const address = [...(zipcodeJa[zipCode]?.address ?? [])];
+    const prefecture = address.shift();
+    const city = address.join(' ');
+    const responseJson = {
+      address,
+      city,
+      prefecture,
+      zipCode,
+    };
+
+    if (!zipCode) {
+      ctx.response.status = 404;
+      return;
+    }
+
+    ctx.response.type = 'application/json';
+    ctx.response.body = JSON.stringify(responseJson);
+    ctx.response.status = 200;
+  }));
+
+  app.use(async (ctx, next) => {
+      const url = ctx.request.url;
+      const isHero = ctx.request.query.isHero;
+      if (url.includes('/images') && url.includes('jpg')) {
+          if (isHero === 'true') {
+              ctx.response.redirect(url.replace('jpg', 'hero.webp'));
+              await next();
+              return;
+          }
+          ctx.response.redirect(url.replace('jpg', 'min.webp'));
+      }
+      await next();
+  });
 
   app.use(serve(rootResolve('dist')));
   app.use(serve(rootResolve('public')));
